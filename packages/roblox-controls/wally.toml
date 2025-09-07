@@ -1,0 +1,16 @@
+[package]
+name = "4x8matrix/roblox-controls"
+version = "0.1.1"
+realm = "shared"
+registry = "https://github.com/UpliftGames/wally-index"
+licence = "MIT"
+authors = ["AsynchronousMatrix"]
+private = true
+
+description = "A simple luau package to manipulate Roblox CoreGui & Controls."
+
+exclude = ["**"]
+include = ["Source", "Source/*", "default.project.json", "wally.toml"]
+
+[dependencies]
+Promise = "evaera/promise@4.x.x"

@@ -1,0 +1,7 @@
+{
+	"name": "roblox-controls",
+	"emitLegacyScripts": false,
+	"tree": {
+		"$path": "src"
+	}
+}
