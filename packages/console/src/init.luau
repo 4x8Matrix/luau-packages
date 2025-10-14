@@ -22,12 +22,23 @@ local LOG_LEVEL_COLORS = table.freeze({
 local LOG_LEVEL_PRIORITIES = { "Debug", "Info", "Notice", "Warn", "Error", "Critical", "Alert", "Emergency" }
 
 local configurations: { [string]: Configuration } = {}
+local globalHooks: { [LogLevel]: { (logger: string, configuration: Configuration, argments: { any }) -> boolean? } } =
+	{}
 local globalConfiguration = {
 	LogLevel = "Debug",
 	Format = "%*[%*][%*][%*]: %*%*%*",
 	Timestamps = false,
 	ANSI = false,
 	Tracebacks = false,
+
+	DebugTraceback = false,
+	InfoTraceback = false,
+	NoticeTraceback = false,
+	WarnTraceback = true,
+	ErrorTraceback = true,
+	CriticalTraceback = true,
+	AlertTraceback = true,
+	EmergencyTraceback = true,
 }
 
 --[=[
@@ -189,12 +200,36 @@ local function getScriptName(hash: string): string
 end
 
 --[[
+	Essentially just a fancier debug.traceback, will allow us to see more details surrounding
+	the traceback.
+]]
+local function traceback(level: number)
+	local lines = {}
+	local index = level + 1
+
+	while true do
+		local script, line, name = debug.info(index, "sln")
+
+		if not script then
+			break
+		end
+
+		index += 1
+
+		table.insert(lines, `Script '{script}', Line {line}{name and ` - function {name}` or ""}`)
+	end
+
+	return table.concat(lines, "\n")
+end
+
+--[[
 	Will construct the message that you'll see in the output.
 ]]
 local function constructContent(hash: string, ...): string
 	local configuration = getScriptConfiguration(hash)
 	local scriptName = getScriptName(hash)
 	local logLevel = debug.info(2, "n")
+	local callingLine = debug.info(3, "l")
 	local message = stringify(configuration, ...)
 	local format = configuration.Format or globalConfiguration.Format
 	local ansiEnabled = configuration.ANSI or globalConfiguration.ANSI
@@ -202,15 +237,19 @@ local function constructContent(hash: string, ...): string
 	local tracebackEnabled = configuration.Tracebacks or globalConfiguration.Tracebacks
 	local timestamp = os.date("%Y-%m-%d %H:%M:%S", os.time())
 
+	if not tracebackEnabled then
+		tracebackEnabled = configuration[`{logLevel}Traceback`]
+	end
+
 	local content = string.format(
 		format,
 		`{ansiEnabled and LOG_LEVEL_COLORS[logLevel] or ``}`,
 		`{timestampsEnabled and `{timestamp}` or `-`}`,
-		`{configuration.Name or scriptName}`,
+		`{configuration.Name or scriptName}:{callingLine}`,
 		logLevel,
 		message,
 		`{ansiEnabled and RESET or ""}`,
-		`{tracebackEnabled and `\nstack traceback{debug.traceback("", 3)}` or ``}`
+		`{tracebackEnabled and `\nStack Begin\n{traceback(3)}\nStack End` or ``}`
 	)
 
 	return content
@@ -219,12 +258,22 @@ end
 --[[
 	returns a boolean that defines if the API that calls this function is able to log to the output.
 ]]
-local function meetsLogLevelRequirement(hash: string): boolean
+local function meetsLogLevelRequirement(hash: string, ...): boolean
 	local configuration = getScriptConfiguration(hash)
 	local targetLoglevel = configuration.LogLevel or globalConfiguration.LogLevel
 	local targetLoglevelPriority = table.find(LOG_LEVEL_PRIORITIES, targetLoglevel)
 	local currentLogLevel = debug.info(2, "n")
 	local currentLogLevelPriority = table.find(LOG_LEVEL_PRIORITIES, currentLogLevel)
+
+	local hooks = globalHooks[currentLogLevel :: LogLevel]
+
+	if hooks then
+		for _, callback in hooks do
+			if callback(hash, configuration, ...) == false then
+				return false
+			end
+		end
+	end
 
 	return currentLogLevelPriority >= targetLoglevelPriority
 end
@@ -240,7 +289,7 @@ end
 	Documented within @console.docs.luau
 ]]
 function Console.Prototype.Debug(self: Console, ...)
-	if meetsLogLevelRequirement(self.Name) then
+	if meetsLogLevelRequirement(self.Name, ...) then
 		local content = constructContent(self.Name, ...)
 
 		print(content)
@@ -251,7 +300,7 @@ end
 	Documented within @console.docs.luau
 ]]
 function Console.Prototype.Info(self: Console, ...)
-	if meetsLogLevelRequirement(self.Name) then
+	if meetsLogLevelRequirement(self.Name, ...) then
 		local content = constructContent(self.Name, ...)
 
 		print(content)
@@ -262,7 +311,7 @@ end
 	Documented within @console.docs.luau
 ]]
 function Console.Prototype.Notice(self: Console, ...)
-	if meetsLogLevelRequirement(self.Name) then
+	if meetsLogLevelRequirement(self.Name, ...) then
 		local content = constructContent(self.Name, ...)
 
 		print(content)
@@ -273,7 +322,7 @@ end
 	Documented within @console.docs.luau
 ]]
 function Console.Prototype.Warn(self: Console, ...)
-	if meetsLogLevelRequirement(self.Name) then
+	if meetsLogLevelRequirement(self.Name, ...) then
 		local content = constructContent(self.Name, ...)
 
 		warn(content)
@@ -284,10 +333,10 @@ end
 	Documented within @console.docs.luau
 ]]
 function Console.Prototype.Error(self: Console, ...)
-	if meetsLogLevelRequirement(self.Name) then
+	if meetsLogLevelRequirement(self.Name, ...) then
 		local content = constructContent(self.Name, ...)
 
-		error(content, math.huge)
+		error(content, -1)
 	end
 end
 
@@ -295,10 +344,10 @@ end
 	Documented within @console.docs.luau
 ]]
 function Console.Prototype.Critical(self: Console, ...)
-	if meetsLogLevelRequirement(self.Name) then
+	if meetsLogLevelRequirement(self.Name, ...) then
 		local content = constructContent(self.Name, ...)
 
-		error(content, math.huge)
+		error(content, -1)
 	end
 end
 
@@ -306,10 +355,10 @@ end
 	Documented within @console.docs.luau
 ]]
 function Console.Prototype.Alert(self: Console, ...)
-	if meetsLogLevelRequirement(self.Name) then
+	if meetsLogLevelRequirement(self.Name, ...) then
 		local content = constructContent(self.Name, ...)
 
-		error(content, math.huge)
+		error(content, -1)
 	end
 end
 
@@ -317,10 +366,10 @@ end
 	Documented within @console.docs.luau
 ]]
 function Console.Prototype.Emergency(self: Console, ...)
-	if meetsLogLevelRequirement(self.Name) then
+	if meetsLogLevelRequirement(self.Name, ...) then
 		local content = constructContent(self.Name, ...)
 
-		error(content, math.huge)
+		error(content, -1)
 	end
 end
 
@@ -333,6 +382,31 @@ function Console.Prototype.Configure(self: Console, config: Configuration)
 	for key, value in config do
 		scriptConfig[key] = value
 	end
+end
+
+--[[
+	@function hook
+	@within Console
+
+	@param logLevel LogLevel
+	@param callback (configuration: Configuration, argments: { any }) -> ()
+	@return ()
+
+	Will allow a developer to hook into a log level, this can be used for reporting logs elsewhere, such as to an
+	external service, or enabling further control over the library.
+
+	returning `false`, will disable the log. Returning `true`, or `nil` will let it output - if the log level is
+	allowed.
+]]
+function Console.Public.hook(
+	logLevel: LogLevel,
+	callback: (logger: string, configuration: Configuration, argments: { any }) -> boolean?
+)
+	if not globalHooks[logLevel] then
+		globalHooks[logLevel] = {}
+	end
+
+	table.insert(globalHooks[logLevel], callback)
 end
 
 --[=[
@@ -387,12 +461,22 @@ export type Configuration = {
 	Format: string?,
 	Name: string?,
 
-	Tracebacks: boolean?,
 	Timestamps: boolean?,
 	ANSI: boolean?,
+	Tracebacks: boolean?,
+
+	DebugTraceback: boolean?,
+	InfoTraceback: boolean?,
+	NoticeTraceback: boolean?,
+	WarnTraceback: boolean?,
+	ErrorTraceback: boolean?,
+	CriticalTraceback: boolean?,
+	AlertTraceback: boolean?,
+	EmergencyTraceback: boolean?,
 }
 export type Console = typeof(Console.Prototype) & {
 	Name: string,
+	Hooks: {},
 }
 
 return Console.Public
